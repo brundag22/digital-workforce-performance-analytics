@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Government Certificate Platform</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 20px; background: #0f172a; color: #e2e8f0; }
+    .container { max-width: 850px; margin: auto; }
+    .card { background: rgba(30, 41, 59, 0.85); border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    h1, h2 { margin-top: 0; color: #38bdf8; }
+    input, select, button { width: 100%; padding: 10px; margin: 6px 0; border-radius: 8px; border: 1px solid #475569; background: #1e293b; color: #fff; }
+    button { background: #0284c7; border: none; font-weight: 600; cursor: pointer; }
+    button:hover { background: #0369a1; }
+    .btn-sm { width: auto; padding: 6px 10px; font-size: 12px; margin: 2px; }
+    .btn-danger { background: #dc2626; }
+    .btn-success { background: #16a34a; }
+    .hidden { display: none; }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .stat-box { flex: 1; min-width: 140px; background: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid #334155; text-align: center; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border-bottom: 1px solid #334155; padding: 8px; text-align: left; font-size: 14px; }
+    .badge { padding: 3px 8px; border-radius: 6px; font-size: 12px; background: #334155; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Government Certificate Platform</h1>
+
+    <div id="authSection" class="card">
+      <h2>Login / Register</h2>
+      <input id="name" placeholder="Full Name (for Register)" />
+      <input id="email" type="email" placeholder="Email" />
+      <input id="password" type="password" placeholder="Password" />
+      <select id="role">
+        <option value="Citizen">Citizen</option>
+        <option value="Agent">Agent</option>
+        <option value="Admin">Admin</option>
+      </select>
+      <div class="row">
+        <button onclick="auth('register')">Register</button>
+        <button onclick="auth('login')">Login</button>
+      </div>
+      <p id="authMsg"></p>
+    </div>
+
+    <div id="dashboard" class="hidden">
+      <div class="card">
+        <div class="row" style="justify-content: space-between;">
+          <span id="userInfo"></span>
+          <button class="btn-sm btn-danger" onclick="logout()">Logout</button>
+        </div>
+      </div>
+
+      <div id="citizenPanel" class="card hidden">
+        <h2>Apply for Certificate</h2>
+        <select id="certType">
+          <option value="Birth Certificate">Birth Certificate</option>
+          <option value="Income Certificate">Income Certificate</option>
+          <option value="Caste Certificate">Caste Certificate</option>
+          <option value="Domicile Certificate">Domicile Certificate</option>
+          <option value="PAN / Aadhaar Services">PAN / Aadhaar Services</option>
+        </select>
+        <input id="docUrl" placeholder="Supporting Document URL (optional)" />
+        <button onclick="submitRequest()">Submit Application</button>
+      </div>
+
+      <div id="adminPanel" class="card hidden">
+        <h2>Platform Overview (Admin)</h2>
+        <div id="statsContainer" class="stats"></div>
+      </div>
+
+      <div class="card">
+        <h2 id="tableTitle">Service Requests</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Certificate</th>
+              <th>Applicant</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="requestsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let token = localStorage.getItem('govt_token');
+    let user = JSON.parse(localStorage.getItem('govt_user') || 'null');
+
+    async function api(url, method = 'GET', body = null) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : null });
+      return res.json();
+    }
+
+    async function auth(type) {
+      const payload = type === 'register'
+        ? { name: name.value, email: email.value, password: password.value, role: role.value }
+        : { email: email.value, password: password.value };
+      const data = await api('/api/auth/' + type, 'POST', payload);
+      if (data.token) {
+        token = data.token;
+        user = data.user;
+        localStorage.setItem('govt_token', token);
+        localStorage.setItem('govt_user', JSON.stringify(user));
+        loadDashboard();
+      } else {
+        authMsg.textContent = data.message || 'Authentication failed';
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('govt_token');
+      localStorage.removeItem('govt_user');
+      location.reload();
+    }
+
+    async function loadDashboard() {
+      authSection.classList.add('hidden');
+      dashboard.classList.remove('hidden');
+      userInfo.textContent = `${user.name} (${user.role})`;
+
+      if (user.role === 'Citizen') citizenPanel.classList.remove('hidden');
+      if (user.role === 'Admin') {
+        adminPanel.classList.remove('hidden');
+        loadStats();
+      }
+      loadRequests();
+    }
+
+    async function submitRequest() {
+      await api('/api/requests', 'POST', {
+        certificate_type: certType.value,
+        document_url: docUrl.value || null
+      });
+      docUrl.value = '';
+      loadRequests();
+    }
+
+    async function respondRequest(id, action) {
+      await api(`/api/requests/${id}/respond`, 'PATCH', { action });
+      loadRequests();
+    }
+
+    async function updateStatus(id, status) {
+      await api(`/api/requests/${id}/status`, 'PATCH', { status });
+      loadRequests();
+    }
+
+    async function loadStats() {
+      const data = await api('/api/admin/stats');
+      const statusHtml = (data.byStatus || [])
+        .map(s => `<div class="stat-box"><strong>${s.count}</strong><div>${s.status}</div></div>`)
+        .join('');
+      statsContainer.innerHTML = `
+        <div class="stat-box"><strong>${data.totalUsers || 0}</strong><div>Total Users</div></div>
+        <div class="stat-box"><strong>${data.totalRequests || 0}</strong><div>Total Requests</div></div>
+        ${statusHtml}
+      `;
+    }
+
+    async function loadRequests() {
+      const endpoint = user.role === 'Citizen'
+        ? '/api/requests/my'
+        : user.role === 'Agent'
+          ? '/api/requests/agent'
+          : '/api/admin/requests';
+
+      const rows = await api(endpoint);
+      requestsBody.innerHTML = rows.map(r => {
+        let actions = '-';
+        if (user.role === 'Agent') {
+          if (r.status === 'Pending') {
+            actions = `
+              <button class="btn-sm btn-success" onclick="respondRequest(${r.id}, 'accept')">Accept</button>
+              <button class="btn-sm btn-danger" onclick="respondRequest(${r.id}, 'reject')">Reject</button>
+            `;
+          } else if (r.status === 'In Progress') {
+            actions = `<button class="btn-sm btn-success" onclick="updateStatus(${r.id}, 'Completed')">Mark Completed</button>`;
+          }
+        }
+        return `
+          <tr>
+            <td>#${r.id}</td>
+            <td>${r.certificate_type}</td>
+            <td>${r.applicant_name || user.name}</td>
+            <td><span class="badge">${r.status}</span></td>
+            <td>${actions}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    if (token && user) loadDashboard();
+  </script>
+</body>
+</html>
